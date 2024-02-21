@@ -2,145 +2,7 @@
 #include "avr/interrupt.h"
 
 #include "PCF8575.h"
-#include "max6675.h"
 
-
-// PCF8575
-#define IO_EXPANDER_I2C_ADDR (0x20)
-#define IO_EXPANDER_SCL (A3)
-#define IO_EXPANDER_SDA (A4)
-
-
-// SPI GPIOS
-#define TEMP_SCK_PIN (13)
-#define TEMP_SO_PIN (12)
-#define TEMP_CS_PIN (10)
-
-
-
-typedef struct{
-  uint16_t readSensor:1;
-}flags_t;
-
-//static flags_t gFlags=0;
-
-static PCF8575 gIoExpander(IO_EXPANDER_I2C_ADDR);
-static int8_t gSensorToRead=-1;
-
-static uint8_t SetCsState(uint8_t state){
-  if(gSensorToRead>15&&gSensorToRead<0){
-    Serial.println("invalid sensor selection");
-  }
-  gIoExpander.write(gSensorToRead,state);
-}
-
-
-
-/*-------------MAX6675_FUNCTIONS-------------*/
-
-byte ReadSPI(void) {
-  int i;
-  byte d = 0;
-
-  for (i = 7; i >= 0; i--) {
-    digitalWrite(TEMP_SCK_PIN, LOW);
-    delayMicroseconds(10);
-    if (digitalRead(TEMP_SO_PIN)) {
-      // set the bit to 0 no matter what
-      d |= (1 << i);
-    }
-
-    digitalWrite(TEMP_SCK_PIN, HIGH);
-    delayMicroseconds(10);
-  }
-
-  return d;
-}
-
-
-void InitTemperature(void) {
-  
-  pinMode(TEMP_SCK_PIN, OUTPUT);
-  pinMode(TEMP_SO_PIN, INPUT);
-
-//  digitalWrite(TEMP_CS_PIN, HIGH);
-  SetCsState(HIGH);
-}
-
-
-float ReadTemperatureInDegC(void) {
-  uint16_t v;
-
-  SetCsState(LOW);
-  delayMicroseconds(10);
-
-  v = ReadSPI();
-  v <<= 8;
-  v |= ReadSPI();
-
-  SetCsState(HIGH);
-
-  if (v & 0x4) {
-    // uh oh, no thermocouple attached!
-    return NAN;
-  }
-
-  v >>= 3;
-  return v * 0.25;
-}
-
-float ReadTemperatureInDegF(void) {
-  return ReadTemperatureInDegC() * 9.0 / 5.0 + 32; 
- }
-
-
-
-
-
-
-
-/*-------------------------------------------*/
-
-static void InitializeSensors(void){
-  uint8_t i;
-}
-
-
-
-
-static void TurnOnAllGpios(){
-  if(gIoExpander.isConnected()){
-//    gIoExpander.write16(15);
-    gIoExpander.write(15,HIGH);
-  }else{
-    Serial.println("PCF8575 disconnected");
-  }
-}
-
-static void TurnOffAllGpios(){
-  if(gIoExpander.isConnected()){
-//    gIoExpander.write16(15);
-    gIoExpander.write(15,LOW);
-  }else{
-    Serial.println("PCF8575 disconnected");
-  }
-}
-
-
-static void InitTimer(void){
-  //djkjnvckdnvkdnv
-}
-
-static void StartTimer(void){
-  
-}
-
-static void StopTimer(void){
-  
-}
-
-
-//
 //static void SensorReadingSM(uint8_t state){
 //  switch(state){
 //    case SENSOR_READING_STATE_READ:{
@@ -161,10 +23,21 @@ static void StopTimer(void){
 
 #define SENSOR_COUNT (16)
 
+// DIP SWITCH
 #define DIP_SWITCH_PIN_4 (4)
 #define DIP_SWITCH_PIN_3 (5)
 #define DIP_SWITCH_PIN_2 (6)
 #define DIP_SWITCH_PIN_1 (7)
+
+// PCF8575
+#define IO_EXPANDER_I2C_ADDR (0x20)
+#define IO_EXPANDER_SCL (A5)
+#define IO_EXPANDER_SDA (A4)
+
+
+// MAX6675 
+#define TEMP_SCK_PIN (13)
+#define TEMP_SO_PIN (12)
 
 
 typedef enum{
@@ -178,7 +51,7 @@ typedef enum{
 
 typedef struct{
   uint8_t id;
-  uint8_t ioNum;
+  uint8_t csIoNum;
   float temperature;
   int timeValue;
 }sensorIns_t;
@@ -187,6 +60,7 @@ typedef struct{
 
 static uint8_t gBoardNum=SENSOR_BOARD_NONE;
 static sensorIns_t gSensorInstances[SENSOR_COUNT]={0};
+static PCF8575 gIoExpander(IO_EXPANDER_I2C_ADDR);
 
 
 static void InitDipSwitchs(void){
@@ -195,6 +69,86 @@ static void InitDipSwitchs(void){
   pinMode(DIP_SWITCH_PIN_3,INPUT);
   pinMode(DIP_SWITCH_PIN_4,INPUT);
 }
+
+static uint8_t SetAllCsState(uint8_t state){
+  
+  if(!gIoExpander.isConnected()){
+    Serial.print(__LINE__);
+    Serial.println(" :[ERR] PCF8575 disconnected");
+    return false;
+  }
+  if(state==HIGH)
+    gIoExpander.write16(0xffff);
+  else if(state==LOW)
+    gIoExpander.write16(0x00);
+  return true;
+}
+
+static uint8_t SetCsState(uint8_t csIo,uint8_t state){
+  
+  if(csIo>=SENSOR_COUNT){
+    Serial.print(__LINE__);
+    Serial.println(" :[ERR] invalid csIo");
+    return false;
+  }
+  if(!gIoExpander.isConnected()){
+    Serial.print(__LINE__);
+    Serial.println(" :[ERR] PCF8575 disconnected");
+    return false;
+  }
+  
+  gIoExpander.write(csIo,state);
+  return true;
+}
+
+byte max6675_ReadSpi(void) {
+  
+  int i;
+  byte d = 0;
+  
+  for (i = 7; i >= 0; i--) {
+    digitalWrite(TEMP_SCK_PIN, LOW);
+    delayMicroseconds(10);
+    if (digitalRead(TEMP_SO_PIN)) {
+      // set the bit to 0 no matter what
+      d |= (1 << i);
+    }
+
+    digitalWrite(TEMP_SCK_PIN, HIGH);
+    delayMicroseconds(10);
+  }
+
+  return d;
+}
+
+static void max6675_Init(void) {
+  pinMode(TEMP_SCK_PIN, OUTPUT);
+  pinMode(TEMP_SO_PIN, INPUT);
+  SetAllCsState(HIGH);
+}
+
+float max6675_ReadTemp(uint8_t csIo) {
+  uint16_t v;
+
+  SetCsState(csIo,LOW);
+  delayMicroseconds(10);
+
+  v = max6675_ReadSpi();
+  v <<= 8;
+  v |= max6675_ReadSpi();
+
+  SetCsState(csIo,HIGH);
+
+  if (v & 0x4) {
+    // uh oh, no thermocouple attached!
+    return NAN;
+  }
+
+  v >>= 3;
+  return v * 0.25;
+}
+
+
 
 static uint8_t DetermineBoardNumber(void){
   if(digitalRead(DIP_SWITCH_PIN_1)==LOW){
@@ -234,22 +188,39 @@ static void InitializeSensorInstances(void){
 
   for(i=0;i<SENSOR_COUNT;i++){
     gSensorInstances[i].id=start;
-    gSensorInstances[i].ioNum=i;
+    gSensorInstances[i].csIoNum=i;
     gSensorInstances[i].temperature=0.0f;
     gSensorInstances[i].timeValue=0U;
     start++;
   }
 }
 
-static void PrintSensorInstances(void)
-{
+static void ReadAllSensors(void){
+  uint8_t i;
+  for(i=0;i<SENSOR_COUNT;i++){
+    gSensorInstances[i].temperature=max6675_ReadTemp(gSensorInstances[i].csIoNum);
+  }
+}
+
+static void PrintAllSensorData(void){
+  uint8_t i;
+  Serial.println();
+  for(i=0;i<SENSOR_COUNT;i++){
+    Serial.print("TEMP[ ");
+    Serial.print(i);
+    Serial.print("] value : ");
+    Serial.println(gSensorInstances[i].temperature);
+  }
+}
+
+static void PrintSensorInstances(void){
   uint8_t i;
   Serial.println();
   for(i=0;i<SENSOR_COUNT;i++){
     Serial.print("{ id: ");
     Serial.print(gSensorInstances[i].id);
     Serial.print(" ioNum: ");
-    Serial.print(gSensorInstances[i].ioNum);
+    Serial.print(gSensorInstances[i].csIoNum);
     Serial.print(" temperature: ");
     Serial.print(gSensorInstances[i].temperature);
     Serial.print(" timeValue: ");
@@ -260,6 +231,8 @@ static void PrintSensorInstances(void)
 
 
 void setup() {
+
+  Wire.begin();
   
   Serial.begin(9600);
   Serial.println();
@@ -280,27 +253,23 @@ void setup() {
   /*------------------------------------------*/
 
   InitializeSensorInstances();
-  
   PrintSensorInstances();
 
   
-//
-//  Wire.begin();
-//  
-//  if(!gIoExpander.begin()){
-//    Serial.println("PCF8575 init failed");
-//  }
-//  Serial.println("PCF8575 initialized");
-//  
-//  InitTemperature();
-
+  while(!gIoExpander.begin()){
+   Serial.println("[ERROR] PCF8575 init failed");
+  }
+  
+  max6675_Init();
 
 }
 
 
 
 void loop() {
-
+  ReadAllSensors();
+  PrintAllSensorData();
+  delay(1000);
     
 
 //  SensorReadingSM(gSensorReadingState);
