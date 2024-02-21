@@ -94,25 +94,10 @@ float ReadTemperatureInDegF(void) {
  }
 
 
-typedef enum{
-  SENSOR_READING_STATE_IDLE=0,
-  SENSOR_READING_STATE_READ=1,
-  SENSOR_READING_STATE_WAIT=2,
-  SENSOR_READING_STATE_MAX,
-}sensorReadingState_t;
 
 
 
 
-#define DEFAULT_SENSOR_CONFIG() 
-
-typedef struct{
-  uint8_t id;
-  float temperature;
-  int timeValue;
-}sensorIns_t;
-
-static sensorIns_t gSensorInstances[16]={0};
 
 /*-------------------------------------------*/
 
@@ -143,7 +128,7 @@ static void TurnOffAllGpios(){
 
 
 static void InitTimer(void){
-  
+  //djkjnvckdnvkdnv
 }
 
 static void StartTimer(void){
@@ -155,23 +140,32 @@ static void StopTimer(void){
 }
 
 
+//
+//static void SensorReadingSM(uint8_t state){
+//  switch(state){
+//    case SENSOR_READING_STATE_READ:{
+//      Serial.println("SENSOR_READING_STATE_READ");
+//      break;
+//    }
+//    case SENSOR_READING_STATE_WAIT:{
+//      Serial.println("SENSOR_READING_STATE_WAIT");
+//      break;
+//    }
+//    default :{
+//      Serial.println("idle state");
+//      break;
+//    }
+//  }
+//}
 
-static void SensorReadingSM(uint8_t state){
-  switch(state){
-    case SENSOR_READING_STATE_READ:{
-      Serial.println("SENSOR_READING_STATE_READ");
-      break;
-    }
-    case SENSOR_READING_STATE_WAIT:{
-      Serial.println("SENSOR_READING_STATE_WAIT");
-      break;
-    }
-    default :{
-      Serial.println("idle state");
-      break;
-    }
-  }
-}
+
+#define SENSOR_COUNT (16)
+
+#define DIP_SWITCH_PIN_4 (4)
+#define DIP_SWITCH_PIN_3 (5)
+#define DIP_SWITCH_PIN_2 (6)
+#define DIP_SWITCH_PIN_1 (7)
+
 
 typedef enum{
   SENSOR_BOARD_NONE=0,
@@ -182,13 +176,18 @@ typedef enum{
   SENSOR_BOARD_MAX,
 }sensorBoard_t;
 
+typedef struct{
+  uint8_t id;
+  uint8_t ioNum;
+  float temperature;
+  int timeValue;
+}sensorIns_t;
 
-#define DIP_SWITCH_PIN_4 (4)
-#define DIP_SWITCH_PIN_3 (5)
-#define DIP_SWITCH_PIN_2 (6)
-#define DIP_SWITCH_PIN_1 (7)
+
 
 static uint8_t gBoardNum=SENSOR_BOARD_NONE;
+static sensorIns_t gSensorInstances[SENSOR_COUNT]={0};
+
 
 static void InitDipSwitchs(void){
   pinMode(DIP_SWITCH_PIN_1,INPUT);
@@ -215,21 +214,75 @@ static uint8_t DetermineBoardNumber(void){
   }
 }
 
-void setup() {
-  Serial.begin(9600);
+static void InitializeSensorInstances(void){
+  uint8_t i=0,start;
+  
+  switch(gBoardNum){
+    case SENSOR_BOARD_1_TO_16:
+    start=1;
+    break;
+    case SENSOR_BOARD_17_TO_32:
+    start=17;
+    break;
+    case SENSOR_BOARD_33_TO_48:
+    start=33;
+    break;
+    case SENSOR_BOARD_49_TO_64:
+    start=49;
+    break;
+  }
 
+  for(i=0;i<SENSOR_COUNT;i++){
+    gSensorInstances[i].id=start;
+    gSensorInstances[i].ioNum=i;
+    gSensorInstances[i].temperature=0.0f;
+    gSensorInstances[i].timeValue=0U;
+    start++;
+  }
+}
+
+static void PrintSensorInstances(void)
+{
+  uint8_t i;
+  Serial.println();
+  for(i=0;i<SENSOR_COUNT;i++){
+    Serial.print("{ id: ");
+    Serial.print(gSensorInstances[i].id);
+    Serial.print(" ioNum: ");
+    Serial.print(gSensorInstances[i].ioNum);
+    Serial.print(" temperature: ");
+    Serial.print(gSensorInstances[i].temperature);
+    Serial.print(" timeValue: ");
+    Serial.print(gSensorInstances[i].timeValue);
+    Serial.println(" }");
+  }
+}
+
+
+void setup() {
+  
+  Serial.begin(9600);
+  Serial.println();
+
+  /*-------------DETECT BOARD NUMBER----------*/
   InitDipSwitchs();
   gBoardNum= DetermineBoardNumber();
 
   while(gBoardNum <= SENSOR_BOARD_NONE 
-  || gBoardNum >= SENSOR_BOARD_MAX){
+        || gBoardNum >= SENSOR_BOARD_MAX)
+  {
       Serial.print("[ERROR] Invalid Board Number: ");
       Serial.println(gBoardNum);
   }
-  
+    
   Serial.print("Board number: ");
   Serial.println(gBoardNum);
+  /*------------------------------------------*/
+
+  InitializeSensorInstances();
   
+  PrintSensorInstances();
+
   
 //
 //  Wire.begin();
@@ -247,6 +300,8 @@ void setup() {
 
 
 void loop() {
+
+    
 
 //  SensorReadingSM(gSensorReadingState);
   
