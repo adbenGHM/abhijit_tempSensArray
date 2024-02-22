@@ -27,14 +27,18 @@
 #define TEMP_SCK_PIN (13)
 #define TEMP_SO_PIN (12)
 
-// SERIAL
-#define SERIAL_RX_PIN (2)
-#define SERIAL_TX_PIN (3)
+
 
 // BUZZER
 #define BUZZER_PIN (8)
 
 #define BUZZER_RUN_TIME (10)
+
+// SERIAL
+#define SERIAL_RX_PIN (2)
+#define SERIAL_TX_PIN (3)
+#define SERIAL_BAUD_RATE (9600)
+#define SERIAL_BUFF_SIZE (256+1)
 
 
 typedef enum {
@@ -101,19 +105,26 @@ typedef struct {
   unsigned long deltaMs;
 } buzzerSm_t;
 
+typedef struct {
+  char dataBuff[SERIAL_BUFF_SIZE + 2];
+  uint16_t dataLen;
+  uint8_t startFlag;
+} serialIntf_t;
 
 
 static uint8_t gBoardNum = SENSOR_BOARD_NONE;
+static uint16_t gProcessTime = 0;
+static uint16_t gFullTime = 0;
+
 static sensorIns_t gSensorInstances[SENSOR_COUNT] = {0};
 static sensorReadingSm_t gSensorReadingSm = {0};
 static buzzerSm_t gBuzzerSm = {0};
-static uint16_t gProcessTime = 0;
-static uint16_t gFullTime = 0;
+static serialIntf_t gSerialIntf={0};
+
 
 
 static PCF8575 gIoExpander(IO_EXPANDER_I2C_ADDR);
 static SoftwareSerial gSerial(SERIAL_RX_PIN, SERIAL_TX_PIN);
-
 
 
 static void InitDipSwitchs(void) {
@@ -393,17 +404,17 @@ static void SensorTimerSM(uint8_t index) {
 
 
         // checks for half time
-        if ( gSensorInstances[index].runTimeMs >= ((gProcessTime / 2)*1000) &&
+        if ( gSensorInstances[index].runTimeMs >= ((gProcessTime / 2) * 1000) &&
              gSensorInstances[index].flags.halfTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_HALF_TIME;
         }
-        else if ( gSensorInstances[index].runTimeMs >= (gProcessTime *1000) &&
+        else if ( gSensorInstances[index].runTimeMs >= (gProcessTime * 1000) &&
                   gSensorInstances[index].flags.fullTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_FULL_TIME;
         }
-        else if (gSensorInstances[index].runTimeMs >= ((gProcessTime + ADDITIONAL_TIME)*1000)  &&
+        else if (gSensorInstances[index].runTimeMs >= ((gProcessTime + ADDITIONAL_TIME) * 1000)  &&
                  gSensorInstances[index].flags.endTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_END_TIME;
@@ -521,6 +532,45 @@ static void CheckForTemperatureTriggers(void) {
   }
 }
 
+static void ClearSerialData(void) {
+  // reset len
+  gSerialIntf.dataLen = 0;
+  // reset data
+  (void)memset(gSerialIntf.dataBuff, '\0', sizeof(gSerialIntf.dataBuff));
+}
+
+static uint8_t ParseSerialData(const char *data,uint16_t len){
+  return true;
+}
+
+static void ProcessSerialData(void) {
+  char ch = '\0';
+  if (gSerial.available() > 0) {
+    
+    ch = gSerial.read();
+    
+    if (gSerialIntf.dataLen >= sizeof(gSerialIntf.dataBuff)) {
+      Serial.print(__LINE__);
+      Serial.println("[WRN] Buffer Overflow");
+      ClearSerialData();
+    }
+    else if (ch == '\n') {
+      gSerialIntf.dataBuff[gSerialIntf.dataLen] = ch;
+      gSerialIntf.dataLen++;
+      // data ready to parse
+      if(ParseSerialData(gSerialIntf.dataBuff,gSerialIntf.dataLen)){
+       gSerial.println("Valid");
+      }
+      
+      ClearSerialData();
+    } else {
+      gSerialIntf.dataBuff[gSerialIntf.dataLen] = ch;
+      gSerialIntf.dataLen++;
+    }
+
+  }
+}
+
 
 void setup() {
 
@@ -567,6 +617,8 @@ void setup() {
     Serial.println(" : [ERR] PCF8575 init failed");
   }
 
+  gSerial.begin(SERIAL_BAUD_RATE);
+
   max6675_Init();
 
   // start sensor state machine
@@ -576,21 +628,23 @@ void setup() {
 }
 
 void loop() {
-  
-  // Sensor reading state machine
-  SensorReadingSM(gSensorReadingSm.state);
 
-  // Calculate time value
-  CalculateProcessTime();
+  ProcessSerialData();
 
-  // Check for trigger
-  CheckForTemperatureTriggers();
-
-  for (uint8_t i = 0; i < (SENSOR_COUNT - 1); i++) {
-    SensorTimerSM(i);
-  }
-
-  BuzzerSM();
+  //  // Sensor reading state machine
+  //  SensorReadingSM(gSensorReadingSm.state);
+  //
+  //  // Calculate time value
+  //  CalculateProcessTime();
+  //
+  //  // Check for trigger
+  //  CheckForTemperatureTriggers();
+  //
+  //  for (uint8_t i = 0; i < (SENSOR_COUNT - 1); i++) {
+  //    SensorTimerSM(i);
+  //  }
+  //
+  //  BuzzerSM();
 
   //  startTime=millis();
   //  ReadAllSensors();
