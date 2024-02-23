@@ -1,7 +1,8 @@
-#include "avr/io.h"
-#include "avr/interrupt.h"
+#include <string.h>
 #include <PCF8575.h>
 #include <SoftwareSerial.h>
+#include "ArduinoJson.h"
+
 
 #define SENSOR_COUNT (16)
 
@@ -38,7 +39,7 @@
 #define SERIAL_RX_PIN (2)
 #define SERIAL_TX_PIN (3)
 #define SERIAL_BAUD_RATE (9600)
-#define SERIAL_BUFF_SIZE (256+1)
+#define SERIAL_BUFF_SIZE (200+2)
 
 
 typedef enum {
@@ -78,6 +79,14 @@ typedef enum {
   BUZZER_STATE_MAX,
 } buzzerState_t;
 
+typedef enum {
+  CMD_TYPE_NONE = 0,
+  CMD_TYPE_SET_TEMP = 1,
+  CMD_TYPE_GET_TEMP = 2,
+  CMD_TYPE_SET_MODE = 3,
+  CMD_TYPE_MAX,
+} cmdType_t;
+
 typedef struct {
   uint8_t id;
   uint8_t csIoNum;
@@ -108,23 +117,60 @@ typedef struct {
 typedef struct {
   char dataBuff[SERIAL_BUFF_SIZE + 2];
   uint16_t dataLen;
-  uint8_t startFlag;
+  uint8_t cr;
 } serialIntf_t;
 
+typedef struct {
+  uint8_t type;
+  union {
+    struct {
+      uint8_t id;
+      uint16_t val;
+    } setTemp;
+
+    struct {
+      uint8_t id;
+    } getTemp;
+
+    
+    struct {
+      uint8_t id;
+      uint8_t mode;
+    } setMode;
+
+  } params;
+
+} cmdInst_t;
+
+
+//static const char *TRUE_VALUE_STR = "true";
+//static const char *FALSE_VALUE_STR = "false";
+//static const char *GET_CMD_FORMAT = "{\"temp\":%u,\"temp_set\":%u,\"time\":%u,\"half_time\":%s,\"full_time\":%s,\"end_time\":%s,\"mode\":%u}";
 
 static uint8_t gBoardNum = SENSOR_BOARD_NONE;
-static uint16_t gProcessTime = 0;
-static uint16_t gFullTime = 0;
+static uint32_t gProcessTime = 0;
+static uint32_t gFullTimeMs = 0;
+
 
 static sensorIns_t gSensorInstances[SENSOR_COUNT] = {0};
 static sensorReadingSm_t gSensorReadingSm = {0};
 static buzzerSm_t gBuzzerSm = {0};
-static serialIntf_t gSerialIntf={0};
+static serialIntf_t gSerialIntf = {0};
+static cmdInst_t gCmdInst = {0};
 
 
 
 static PCF8575 gIoExpander(IO_EXPANDER_I2C_ADDR);
 static SoftwareSerial gSerial(SERIAL_RX_PIN, SERIAL_TX_PIN);
+
+static void ErrorHandler(int line, const char *reason) {
+  while (1) {
+    Serial.print(__LINE__);
+    Serial.print(" :[ERR]");
+    Serial.println(reason);
+    delay(1000);
+  }
+}
 
 
 static void InitDipSwitchs(void) {
@@ -138,7 +184,7 @@ static uint8_t SetAllCsState(uint8_t state) {
 
   if (!gIoExpander.isConnected()) {
     Serial.print(__LINE__);
-    Serial.println(" :[ERR] PCF8575 disconnected");
+    Serial.println(F(" :[ERR] PCF8575 disconnected"));
     return false;
   }
   if (state == HIGH)
@@ -152,12 +198,12 @@ static uint8_t SetCsState(uint8_t csIo, uint8_t state) {
 
   if (csIo >= SENSOR_COUNT) {
     Serial.print(__LINE__);
-    Serial.println(" :[ERR] invalid csIo");
+    Serial.println(F(" :[ERR] invalid csIo"));
     return false;
   }
   if (!gIoExpander.isConnected()) {
     Serial.print(__LINE__);
-    Serial.println(" :[ERR] PCF8575 disconnected");
+    Serial.println(F(" :[ERR] PCF8575 disconnected"));
     return false;
   }
 
@@ -205,7 +251,7 @@ float max6675_ReadTemp(uint8_t csIo) {
 
   if (v & 0x4) {
     // uh oh, no thermocouple attached!
-    return NAN;
+    return 0.0f;
   }
 
   v >>= 3;
@@ -252,7 +298,13 @@ static void InitializeSensorInstances(void) {
     gSensorInstances[i].id = start;
     gSensorInstances[i].csIoNum = i;
     gSensorInstances[i].tempRead = 0.0f;
+    gSensorInstances[i].tempSet = TEMPERATURE_SET_POINT_DEFAULT;
     gSensorInstances[i].timerState = SENSOR_TIMER_STATE_STOP;
+    gSensorInstances[i].startTimeMs = 0;
+    gSensorInstances[i].runTimeMs = 0;
+    gSensorInstances[i].flags.halfTime = false;
+    gSensorInstances[i].flags.fullTime = false;
+    gSensorInstances[i].flags.endTime = false;
     start++;
   }
 }
@@ -261,8 +313,8 @@ static void ReadAllSensors(void) {
   uint8_t i;
   for (i = 0; i < SENSOR_COUNT; i++) {
     gSensorInstances[i].tempRead = max6675_ReadTemp(gSensorInstances[i].csIoNum);
-    if (gSensorInstances[i].tempRead >= TEMPERATURE_MAX_POINT)
-      gSensorInstances[i].tempRead = NAN;
+    if (gSensorInstances[i].tempRead >= TEMPERATURE_MAX_POINT )
+      gSensorInstances[i].tempRead = 0.0f;
   }
 }
 
@@ -270,9 +322,9 @@ static void PrintAllSensorData(void) {
   uint8_t i;
   Serial.println();
   for (i = 0; i < SENSOR_COUNT; i++) {
-    Serial.print("TEMP[ ");
+    Serial.print(F("TEMP[ "));
     Serial.print(gSensorInstances[i].id);
-    Serial.print("] value : ");
+    Serial.print(F("] value : "));
     Serial.println(gSensorInstances[i].tempRead);
   }
 }
@@ -281,13 +333,13 @@ static void PrintSensorInstances(void) {
   uint8_t i;
   Serial.println();
   for (i = 0; i < SENSOR_COUNT; i++) {
-    Serial.print("{ id: ");
+    Serial.print(F("{ id: "));
     Serial.print(gSensorInstances[i].id);
-    Serial.print(" ioNum: ");
+    Serial.print(F(" ioNum: "));
     Serial.print(gSensorInstances[i].csIoNum);
-    Serial.print(" tempRead: ");
+    Serial.print(F(" tempRead: "));
     Serial.print(gSensorInstances[i].tempRead);
-    Serial.println(" }");
+    Serial.println(F(" }"));
   }
 }
 
@@ -305,7 +357,6 @@ static void BuzzerSM(void) {
   {
     case BUZZER_STATE_START:
       {
-        // TODO use macro
         digitalWrite(BUZZER_PIN, HIGH);
         gBuzzerSm.startMs = millis();
         gBuzzerSm.state = BUZZER_STATE_WAIT;
@@ -315,13 +366,13 @@ static void BuzzerSM(void) {
       {
         gBuzzerSm.deltaMs = millis() - gBuzzerSm.startMs;
         if (gBuzzerSm.deltaMs >= (BUZZER_RUN_TIME * 1000)) {
-          // TODO use macro
           digitalWrite(BUZZER_PIN, LOW);
           gBuzzerSm.state = BUZZER_STATE_STOP;
-          // TODO log disable
-          Serial.print(__func__);
-          Serial.print(" : deltaMs: ");
-          Serial.println(gBuzzerSm.deltaMs);
+
+          // TODO diable logs
+          //          Serial.print(__func__);
+          //          Serial.print(" : deltaMs: ");
+          //          Serial.println(gBuzzerSm.deltaMs);
         }
         break;
       }
@@ -332,9 +383,7 @@ static void BuzzerSM(void) {
       }
     default:
       {
-        // TODO stop program
-        Serial.print(__LINE__);
-        Serial.println(": [ERR] invalid state");
+        ErrorHandler(__LINE__, "invalid state");
         break;
       }
   }
@@ -342,27 +391,36 @@ static void BuzzerSM(void) {
 
 
 static void SensorReadingSM(uint8_t state) {
+
   switch (state) {
     case SENSOR_READ_STATE_START: {
-        Serial.println("Sensor Reading started");
         gSensorReadingSm.state = SENSOR_READ_STATE_READ;
+
+        // TODO disbale logs
+        //        Serial.println("Sensor Reading started");
         break;
       }
     case SENSOR_READ_STATE_READ: {
+
         ReadAllSensors();
         gSensorReadingSm.startMs = millis();
-        PrintAllSensorData();
         gSensorReadingSm.state = SENSOR_READ_STATE_WAIT;
+
+        // TODO disbale logs
+        //        PrintAllSensorData();
         break;
       }
     case SENSOR_READ_STATE_WAIT: {
         gSensorReadingSm.deltaMs = millis() - gSensorReadingSm.startMs;
         if (gSensorReadingSm.deltaMs >= 250) // TODO use macro
         {
-          Serial.print("deltaTime: ");
-          Serial.print(gSensorReadingSm.deltaMs);
-          Serial.println(" ms");
           gSensorReadingSm.state = SENSOR_READ_STATE_READ;
+
+          // TODO disable logs
+          //          Serial.print("deltaTime: ");
+          //          Serial.print(gSensorReadingSm.deltaMs);
+          //          Serial.println(" ms");
+
         }
         break;
       }
@@ -372,9 +430,7 @@ static void SensorReadingSM(uint8_t state) {
       }
 
     default : {
-        // TODO stop program
-        Serial.print(__LINE__);
-        Serial.println(" :[ERR] invalid state");
+        ErrorHandler(__LINE__, "invalid state");
         break;
       }
   }
@@ -382,17 +438,13 @@ static void SensorReadingSM(uint8_t state) {
 
 static void SensorTimerSM(uint8_t index) {
 
-  if (index >= SENSOR_COUNT - 1) {
-    Serial.print(__LINE__);
-    Serial.println("invalid input");
-  }
+  if (index >= SENSOR_COUNT - 1)
+    ErrorHandler(__LINE__, "invalid input");
 
   switch (gSensorInstances[index].timerState)
   {
-
     case SENSOR_TIMER_STATE_START:
       {
-        // TODO millis will expires in 49 days.
         gSensorInstances[index].startTimeMs = millis();
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
         break;
@@ -400,35 +452,31 @@ static void SensorTimerSM(uint8_t index) {
     case SENSOR_TIMER_STATE_WAIT:
       {
         gSensorInstances[index].runTimeMs = millis() - gSensorInstances[index].startTimeMs;
-
-
+        gFullTimeMs = (gProcessTime * 1000);
 
         // checks for half time
-        if ( gSensorInstances[index].runTimeMs >= ((gProcessTime / 2) * 1000) &&
+        if ( gSensorInstances[index].runTimeMs >= gFullTimeMs / 2 &&
              gSensorInstances[index].flags.halfTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_HALF_TIME;
         }
-        else if ( gSensorInstances[index].runTimeMs >= (gProcessTime * 1000) &&
+        else if ( gSensorInstances[index].runTimeMs >= gFullTimeMs &&
                   gSensorInstances[index].flags.fullTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_FULL_TIME;
         }
-        else if (gSensorInstances[index].runTimeMs >= ((gProcessTime + ADDITIONAL_TIME) * 1000)  &&
+        else if (gSensorInstances[index].runTimeMs >= (gFullTimeMs + (ADDITIONAL_TIME * 1000)) &&
                  gSensorInstances[index].flags.endTime == false)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_END_TIME;
         }
         else {
-
-          // TODO hanlde error
-          //          if (gSensorInstances[index].runTimeMs > (gProcessTime + ADDITIONAL_TIME)) {
-          //            Serial.print(__LINE__);
-          //            Serial.println("critical error");
-          //          }
-          //TODO do nothing
+          // TODO is it valid
+          if (gSensorInstances[index].runTimeMs > (gFullTimeMs + (ADDITIONAL_TIME * 1000)) &&
+              gSensorInstances[index].flags.endTime == true) {
+            ErrorHandler(__LINE__, "critical error");
+          }
         }
-
         break;
       }
     case SENSOR_TIMER_STATE_HALF_TIME:
@@ -466,7 +514,7 @@ static void SensorTimerSM(uint8_t index) {
     default : {
         // TODO stop program
         Serial.print(__LINE__);
-        Serial.println(" :[ERR] invalid state");
+        Serial.println(F(" :[ERR] invalid state"));
         break;
       }
   }
@@ -485,83 +533,179 @@ static void CalculateProcessTime(void) {
   float temp = gSensorInstances[SENSOR_COUNT - 1].tempRead;
   if (temp != NAN && (int)temp < TEMPERATURE_MAX_POINT) {
     gProcessTime = (435 + (325 - temp)) + (60 * ((325 - temp) / 50)); // TODO calculate actual process time
-    Serial.print("Process Time: ");
+    Serial.print(F("Process Time: "));
     Serial.print(gProcessTime);
-    Serial.println(" sec");
+    Serial.println(F(" sec"));
   } else {
     gProcessTime = 0;
   }
 }
 
+static void StartTimer(uint8_t index) {
+  // start timer only when timer is not running
+  // ie.SENSOR_TIMER_STATE_STOP
+  if (gSensorInstances[index].timerState == SENSOR_TIMER_STATE_STOP)
+    gSensorInstances[index].timerState = SENSOR_TIMER_STATE_START;
+
+}
+
 static void CheckForTemperatureTriggers(void) {
   uint8_t i;
   for (i = 0; i < (SENSOR_COUNT - 1); i++) {
-    if (gSensorInstances[i].tempSet <= 0 )
+
+    if (gSensorInstances[i].tempSet <= 0 || gSensorInstances[i].tempSet >= TEMPERATURE_MAX_POINT)
     {
-      Serial.print(__LINE__);
-      Serial.println(" :[ERR] invalid set temperature");
+      ErrorHandler(__LINE__, "invalid temperature setting");
       break;
     } else if (gSensorInstances[i].tempRead == NAN) {
-      Serial.print(__LINE__);
-      Serial.println(" :[ERR] invalid temperature");
+
+      // TODO disable log
+      Serial.print(gSensorInstances[i].id);
+      Serial.println(F("prob disconnected"));
+
       break;
     }
-    else if ((int)gSensorInstances[i].tempRead >=
+    else if ((uint16_t)gSensorInstances[i].tempRead >=
              gSensorInstances[i].tempSet)
     {
-      // TODO find ways to disable logs
-      Serial.print("Temperature Set Point Reached :[ ");
-      Serial.print(i);
-      Serial.println(" ]");
-
-      // Only start timer if timer not running ie.  SENSOR_TIMER_STATE_STOP
-      if (gSensorInstances[i].timerState == SENSOR_TIMER_STATE_STOP)
-      {
-        gSensorInstances[i].timerState = SENSOR_TIMER_STATE_START;
-      }
-      else
-      {
-        Serial.print("[WRN] Timer allready running for sensor id[ ");
-        Serial.print(gSensorInstances[i].id);
-        Serial.println(" ]");
-      }
-
-
+      // TODO disable log
+      Serial.print(gSensorInstances[i].id);
+      Serial.println(F(" Probe Set point reached"));
+      StartTimer(i);
     }
 
   }
 }
 
+static uint8_t IsIdValid(uint8_t id) {
+  uint8_t ret = true;
+
+  switch (gBoardNum) {
+    case SENSOR_BOARD_1_TO_16:
+      ret = (id < 1 || id >= 16 ) ? false : true;
+      break;
+    case SENSOR_BOARD_17_TO_32:
+      ret = (id < 17 || id >= 32 ) ? false : true;
+      break;
+    case SENSOR_BOARD_33_TO_48:
+      ret = (id < 33 || id >= 48 ) ? false : true;
+      break;
+    case SENSOR_BOARD_49_TO_64:
+      ret = (id < 49 || id >= 64 ) ? false : true;
+      break;
+    default:
+      ret = false;
+      break;
+  }
+  return ret;
+}
+
+static void CreateGetCmdResponce(uint8_t id) {
+
+  uint8_t i = 0;
+  for (i = 0; i < SENSOR_COUNT; i++) {
+    if (gSensorInstances[i].id == id) {
+      break;
+    }
+  }
+  memset(gSerialIntf.dataBuff, 0, sizeof(gSerialIntf.dataBuff));
+  JsonDocument doc;
+  doc["temp"] = gSensorInstances[i].tempRead;
+  doc["temp_set"] = (uint16_t)gSensorInstances[i].tempSet;
+  doc["time"] = (uint16_t)(gProcessTime - gSensorInstances[i].runTimeMs);
+  doc["half_time"] = (bool)gSensorInstances[i].flags.halfTime;
+  doc["full_time"] = (bool)gSensorInstances[i].flags.fullTime;
+  doc["end_time"] = (bool)gSensorInstances[i].flags.endTime;
+  doc["mode"] = (uint8_t)1;
+
+  serializeJson(doc, gSerialIntf.dataBuff, sizeof(gSerialIntf.dataBuff));
+
+}
+
+static void ParseSerialData(const char *data) {
+
+  gCmdInst.type = CMD_TYPE_NONE;
+
+  if (data == NULL) {
+    Serial.print(__LINE__);
+    Serial.println(F("nullptr"));
+    return ;
+  }
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, data);
+
+  if (error) {
+    Serial.print(__LINE__);
+    Serial.println(F(" :[WRN]invalid json"));
+    return ;
+  }
+
+  const char *cmd = doc["cmd"];
+
+  if (strcmp(cmd, "set") == 0) {
+    gCmdInst.params.setTemp.id = doc["id"].as<uint8_t>();
+    gCmdInst.params.setTemp.val = (uint16_t)doc["val"].as<float>();
+    gCmdInst.type = IsIdValid(gCmdInst.params.setTemp.id) ? CMD_TYPE_SET_TEMP : CMD_TYPE_NONE;
+
+  } else if (strcmp(cmd, "get") == 0) {
+
+    gCmdInst.params.getTemp.id = doc["id"].as<uint8_t>();
+    gCmdInst.type = IsIdValid(gCmdInst.params.getTemp.id) ? CMD_TYPE_GET_TEMP : CMD_TYPE_NONE;
+
+  } else if (strcmp(cmd, "set_mode") == 0) {
+
+    gCmdInst.params.getTemp.id = doc["id"].as<uint8_t>();
+    gCmdInst.type = IsIdValid(gCmdInst.params.getTemp.id) ? CMD_TYPE_GET_TEMP : CMD_TYPE_NONE;
+
+  }else {
+    gCmdInst.type = CMD_TYPE_NONE;
+  }
+}
+
 static void ClearSerialData(void) {
+  gSerialIntf.cr = false;
   // reset len
   gSerialIntf.dataLen = 0;
   // reset data
   (void)memset(gSerialIntf.dataBuff, '\0', sizeof(gSerialIntf.dataBuff));
 }
 
-static uint8_t ParseSerialData(const char *data,uint16_t len){
-  return true;
-}
-
 static void ProcessSerialData(void) {
   char ch = '\0';
   if (gSerial.available() > 0) {
-    
     ch = gSerial.read();
-    
     if (gSerialIntf.dataLen >= sizeof(gSerialIntf.dataBuff)) {
       Serial.print(__LINE__);
-      Serial.println("[WRN] Buffer Overflow");
+      Serial.println(F("[WRN] Buffer Overflow"));
       ClearSerialData();
     }
+    else if (ch == '\r') {
+      gSerialIntf.cr = true;
+    }
     else if (ch == '\n') {
-      gSerialIntf.dataBuff[gSerialIntf.dataLen] = ch;
-      gSerialIntf.dataLen++;
-      // data ready to parse
-      if(ParseSerialData(gSerialIntf.dataBuff,gSerialIntf.dataLen)){
-       gSerial.println("Valid");
+      if (gSerialIntf.cr) {
+        gSerialIntf.dataBuff[gSerialIntf.dataLen] = '\0';
+        gSerialIntf.dataLen++;
+        // data ready to parse
+        ParseSerialData(gSerialIntf.dataBuff);
+
+        switch (gCmdInst.type) {
+
+          case CMD_TYPE_SET_TEMP: {
+              // TODO store value in eeprom
+              break;
+            }
+          case CMD_TYPE_GET_TEMP: {
+              CreateGetCmdResponce(gCmdInst.params.getTemp.id);
+              gSerial.println(gSerialIntf.dataBuff);
+              break;
+            }
+          default:
+            break;
+        }
+
       }
-      
       ClearSerialData();
     } else {
       gSerialIntf.dataBuff[gSerialIntf.dataLen] = ch;
@@ -569,6 +713,11 @@ static void ProcessSerialData(void) {
     }
 
   }
+}
+
+static  uint8_t IsBoardNumValid(uint8_t boardNum) {
+  return (gBoardNum <= SENSOR_BOARD_NONE
+          || gBoardNum >= SENSOR_BOARD_MAX) ? false : true;
 }
 
 
@@ -580,7 +729,7 @@ void setup() {
   Serial.println();
 
   gSerial.begin(9600);
-  gSerial.println("Hello soft serail");
+  gSerial.println(F("Hello soft serail"));
 
   pinMode(BUZZER_PIN, OUTPUT);
 
@@ -588,15 +737,11 @@ void setup() {
 
   gBoardNum = DetermineBoardNumber();
 
-  while (gBoardNum <= SENSOR_BOARD_NONE
-         || gBoardNum >= SENSOR_BOARD_MAX)
-  {
-    Serial.println(__LINE__);
-    Serial.print(" : [ERR] Invalid Board Number: ");
-    Serial.println(gBoardNum);
+  if (!IsBoardNumValid) {
+    ErrorHandler(__LINE__, "invalid board number");
   }
 
-  Serial.print("Board number: ");
+  Serial.print(F("Board number: "));
   Serial.println(gBoardNum);
 
   InitializeSensorInstances();
@@ -607,14 +752,12 @@ void setup() {
     If temperature set point not found in EEPROM
     set points to TEMPERATURE_SET_POINT_DEFAULT
   */
-  SetTemperatureSetPointsToDefault();
+  //  SetTemperatureSetPointsToDefault();
 
   PrintSensorInstances();
 
-
-  while (!gIoExpander.begin()) {
-    Serial.print(__LINE__);
-    Serial.println(" : [ERR] PCF8575 init failed");
+  if (!gIoExpander.begin()) {
+    ErrorHandler(__LINE__, "critical error");
   }
 
   gSerial.begin(SERIAL_BAUD_RATE);
@@ -631,20 +774,22 @@ void loop() {
 
   ProcessSerialData();
 
-  //  // Sensor reading state machine
-  //  SensorReadingSM(gSensorReadingSm.state);
-  //
-  //  // Calculate time value
-  //  CalculateProcessTime();
-  //
-  //  // Check for trigger
-  //  CheckForTemperatureTriggers();
-  //
-  //  for (uint8_t i = 0; i < (SENSOR_COUNT - 1); i++) {
-  //    SensorTimerSM(i);
-  //  }
-  //
-  //  BuzzerSM();
+  // Sensor reading state machine
+  SensorReadingSM(gSensorReadingSm.state);
+
+//    PrintAllSensorData();
+
+  // Calculate time value
+  CalculateProcessTime();
+
+  // Check for trigger
+  CheckForTemperatureTriggers();
+
+  for (uint8_t i = 0; i < (SENSOR_COUNT - 1); i++) {
+    SensorTimerSM(i);
+  }
+
+  BuzzerSM();
 
   //  startTime=millis();
   //  ReadAllSensors();
