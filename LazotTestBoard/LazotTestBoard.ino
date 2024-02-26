@@ -1,6 +1,7 @@
 #include <string.h>
 #include <PCF8575.h>
 #include <SoftwareSerial.h>
+#include <EEPROM.h>
 #include "ArduinoJson.h"
 
 
@@ -32,7 +33,6 @@
 
 // BUZZER
 #define BUZZER_PIN (8)
-
 #define BUZZER_RUN_TIME (10)
 
 // SERIAL
@@ -40,6 +40,16 @@
 #define SERIAL_TX_PIN (3)
 #define SERIAL_BAUD_RATE (9600)
 #define SERIAL_BUFF_SIZE (200+2)
+
+// SOLINOID
+#define SOLENOID_PIN (9)
+
+// MODE
+#define DEFAULT_MODE (1)
+
+// EEPROM
+#define EEPROM_START_ADDR (0x02)
+#define EEPROM_DATA_OFFSET (0x02)
 
 
 typedef enum {
@@ -79,6 +89,21 @@ typedef enum {
   BUZZER_STATE_MAX,
 } buzzerState_t;
 
+#define TIME_FOR_MODE_1 (1*60)
+#define TIME_FOR_MODE_2 (2*60)
+#define TIME_FOR_MODE_3 (3*60)
+#define TIME_FOR_MODE_4 (4*60)
+
+typedef enum {
+  SENSOR_MODE_NONE = 0,
+  SENSOR_MODE_1 = 1,
+  SENSOR_MODE_2 = 2,
+  SENSOR_MODE_3 = 3,
+  SENSOR_MODE_4 = 4,
+  SENSOR_MODE_MAX,
+} sensorMode_t;
+
+
 typedef enum {
   CMD_TYPE_NONE = 0,
   CMD_TYPE_SET_TEMP = 1,
@@ -87,9 +112,13 @@ typedef enum {
   CMD_TYPE_MAX,
 } cmdType_t;
 
+
+
+
 typedef struct {
   uint8_t id;
   uint8_t csIoNum;
+  uint8_t mode;
   float tempRead;
   uint16_t tempSet;
   unsigned long startTimeMs;
@@ -132,7 +161,7 @@ typedef struct {
       uint8_t id;
     } getTemp;
 
-    
+
     struct {
       uint8_t id;
       uint8_t mode;
@@ -146,11 +175,33 @@ typedef struct {
 //static const char *TRUE_VALUE_STR = "true";
 //static const char *FALSE_VALUE_STR = "false";
 //static const char *GET_CMD_FORMAT = "{\"temp\":%u,\"temp_set\":%u,\"time\":%u,\"half_time\":%s,\"full_time\":%s,\"end_time\":%s,\"mode\":%u}";
+typedef struct {
+  uint8_t mode;
+  uint16_t  tempSet;
+} romStruct_t;
+
+static const uint8_t EEPROM_ADDRESS_TABLE[] = {
+  0x00,
+  0x03,
+  0x06,
+  0x09,
+  0x0c,
+  0x0f,
+  0x12,
+  0x15,
+  0x18,
+  0x1b,
+  0x1e,
+  0x21,
+  0x24,
+  0x27,
+  0x2a,
+};
 
 static uint8_t gBoardNum = SENSOR_BOARD_NONE;
+static uint8_t gMode = DEFAULT_MODE;
 static uint32_t gProcessTime = 0;
 static uint32_t gFullTimeMs = 0;
-
 
 static sensorIns_t gSensorInstances[SENSOR_COUNT] = {0};
 static sensorReadingSm_t gSensorReadingSm = {0};
@@ -258,6 +309,37 @@ float max6675_ReadTemp(uint8_t csIo) {
   return v * 0.25;
 }
 
+static uint8_t IsIdValid(uint8_t id) {
+  uint8_t ret = true;
+
+  switch (gBoardNum) {
+    case SENSOR_BOARD_1_TO_16:
+      ret = (id < 1 || id >= 16 ) ? false : true;
+      break;
+    case SENSOR_BOARD_17_TO_32:
+      ret = (id < 17 || id >= 32 ) ? false : true;
+      break;
+    case SENSOR_BOARD_33_TO_48:
+      ret = (id < 33 || id >= 48 ) ? false : true;
+      break;
+    case SENSOR_BOARD_49_TO_64:
+      ret = (id < 49 || id >= 64 ) ? false : true;
+      break;
+    default:
+      ret = false;
+      break;
+  }
+  return ret;
+}
+
+static uint8_t IsModeValid(uint8_t mode) {
+  if (mode <= 0 && mode >= 5)
+    return false;
+  else
+    return true;
+}
+
+
 static uint8_t DetermineBoardNumber(void) {
   if (digitalRead(DIP_SWITCH_PIN_1) == LOW) {
     return SENSOR_BOARD_1_TO_16;
@@ -275,6 +357,65 @@ static uint8_t DetermineBoardNumber(void) {
     return SENSOR_BOARD_NONE;
   }
 }
+
+static void ReadSetTempsFromRom(void) {
+  uint8_t i;
+  for (i = 0; i < (SENSOR_COUNT - 1); i++) {
+    romStruct_t data = {0};
+    EEPROM.get(EEPROM_ADDRESS_TABLE[i], data);
+    gSensorInstances[i].mode = data.mode;
+    gSensorInstances[i].tempSet = data.tempSet;
+  }
+}
+
+static uint8_t WriteSetTempToRom(uint8_t id, uint16_t val) {
+  if (val <= 0 || val >= TEMPERATURE_MAX_POINT)
+    return false;
+  uint8_t i, found = false;
+
+  for ( i = 0; i < (SENSOR_COUNT - 1); i++) {
+    if (gSensorInstances[i].id == id) {
+      found = true;
+      break;
+    }
+  }
+
+  if (found) {
+    romStruct_t data = {0};
+    EEPROM.get(EEPROM_ADDRESS_TABLE[i], data);
+    data.tempSet = val;
+    EEPROM.put(EEPROM_ADDRESS_TABLE[i], data);
+    gSensorInstances[i].tempSet = val;
+    return true;
+  } else
+    return false;
+}
+
+static uint8_t WriteModeToRom(uint8_t id, uint8_t mode) {
+  if (mode <= SENSOR_MODE_NONE || mode >= SENSOR_MODE_MAX)
+    return false;
+  uint8_t i, found = false;
+
+  for ( i = 0; i < (SENSOR_COUNT - 1); i++) {
+    if (gSensorInstances[i].id == id) {
+      found = true;
+      break;
+    }
+  }
+
+  if (found) {
+    romStruct_t data = {0};
+    EEPROM.get(EEPROM_ADDRESS_TABLE[i], data);
+    data.mode = mode;
+    EEPROM.put(EEPROM_ADDRESS_TABLE[i], data);
+    gSensorInstances[i].mode = mode;
+    return true;
+  } else
+    return false;
+}
+
+
+
 
 static void InitializeSensorInstances(void) {
   uint8_t i = 0, start;
@@ -309,6 +450,20 @@ static void InitializeSensorInstances(void) {
   }
 }
 
+void SetSettingsToDefault(void) {
+  uint8_t i;
+  for (i = 0; i < (SENSOR_COUNT - 1); i++) {
+    if (gSensorInstances[i].mode <= SENSOR_MODE_NONE
+        || gSensorInstances[i].mode >= SENSOR_MODE_MAX) {
+      gSensorInstances[i].mode = SENSOR_MODE_1;
+    }
+    if (gSensorInstances[i].tempSet <= 0
+        || gSensorInstances[i].tempSet >= TEMPERATURE_MAX_POINT) {
+      gSensorInstances[i].tempSet = TEMPERATURE_SET_POINT_DEFAULT;
+    }
+  }
+}
+
 static void ReadAllSensors(void) {
   uint8_t i;
   for (i = 0; i < SENSOR_COUNT; i++) {
@@ -337,8 +492,10 @@ static void PrintSensorInstances(void) {
     Serial.print(gSensorInstances[i].id);
     Serial.print(F(" ioNum: "));
     Serial.print(gSensorInstances[i].csIoNum);
-    Serial.print(F(" tempRead: "));
-    Serial.print(gSensorInstances[i].tempRead);
+    Serial.print(F(" tempSet: "));
+    Serial.print(gSensorInstances[i].tempSet);
+    Serial.print(F(" mode: "));
+    Serial.print(gSensorInstances[i].mode);
     Serial.println(F(" }"));
   }
 }
@@ -533,9 +690,9 @@ static void CalculateProcessTime(void) {
   float temp = gSensorInstances[SENSOR_COUNT - 1].tempRead;
   if (temp != NAN && (int)temp < TEMPERATURE_MAX_POINT) {
     gProcessTime = (435 + (325 - temp)) + (60 * ((325 - temp) / 50)); // TODO calculate actual process time
-    Serial.print(F("Process Time: "));
-    Serial.print(gProcessTime);
-    Serial.println(F(" sec"));
+    //    Serial.print(F("Process Time: "));
+    //    Serial.print(gProcessTime);
+    //    Serial.println(F(" sec"));
   } else {
     gProcessTime = 0;
   }
@@ -577,28 +734,7 @@ static void CheckForTemperatureTriggers(void) {
   }
 }
 
-static uint8_t IsIdValid(uint8_t id) {
-  uint8_t ret = true;
 
-  switch (gBoardNum) {
-    case SENSOR_BOARD_1_TO_16:
-      ret = (id < 1 || id >= 16 ) ? false : true;
-      break;
-    case SENSOR_BOARD_17_TO_32:
-      ret = (id < 17 || id >= 32 ) ? false : true;
-      break;
-    case SENSOR_BOARD_33_TO_48:
-      ret = (id < 33 || id >= 48 ) ? false : true;
-      break;
-    case SENSOR_BOARD_49_TO_64:
-      ret = (id < 49 || id >= 64 ) ? false : true;
-      break;
-    default:
-      ret = false;
-      break;
-  }
-  return ret;
-}
 
 static void CreateGetCmdResponce(uint8_t id) {
 
@@ -612,7 +748,7 @@ static void CreateGetCmdResponce(uint8_t id) {
   JsonDocument doc;
   doc["temp"] = gSensorInstances[i].tempRead;
   doc["temp_set"] = (uint16_t)gSensorInstances[i].tempSet;
-  doc["time"] = (uint16_t)(gProcessTime - gSensorInstances[i].runTimeMs);
+  doc["time_remain"] = (uint16_t)(gProcessTime - gSensorInstances[i].runTimeMs);
   doc["half_time"] = (bool)gSensorInstances[i].flags.halfTime;
   doc["full_time"] = (bool)gSensorInstances[i].flags.fullTime;
   doc["end_time"] = (bool)gSensorInstances[i].flags.endTime;
@@ -653,12 +789,15 @@ static void ParseSerialData(const char *data) {
     gCmdInst.params.getTemp.id = doc["id"].as<uint8_t>();
     gCmdInst.type = IsIdValid(gCmdInst.params.getTemp.id) ? CMD_TYPE_GET_TEMP : CMD_TYPE_NONE;
 
-  } else if (strcmp(cmd, "set_mode") == 0) {
+  } else if (strcmp(cmd, "mode") == 0) {
 
-    gCmdInst.params.getTemp.id = doc["id"].as<uint8_t>();
-    gCmdInst.type = IsIdValid(gCmdInst.params.getTemp.id) ? CMD_TYPE_GET_TEMP : CMD_TYPE_NONE;
+    gCmdInst.params.setMode.id = doc["id"].as<uint8_t>();
+    gCmdInst.params.setMode.mode = doc["mode"].as<uint8_t>();
+    gCmdInst.type = IsIdValid(gCmdInst.params.setMode.id) ? CMD_TYPE_SET_MODE : CMD_TYPE_NONE;
+    gCmdInst.type = IsModeValid(gCmdInst.params.setMode.mode) ? CMD_TYPE_SET_MODE : CMD_TYPE_NONE;
 
-  }else {
+
+  } else {
     gCmdInst.type = CMD_TYPE_NONE;
   }
 }
@@ -687,18 +826,32 @@ static void ProcessSerialData(void) {
       if (gSerialIntf.cr) {
         gSerialIntf.dataBuff[gSerialIntf.dataLen] = '\0';
         gSerialIntf.dataLen++;
+
+        // TODO echo
+        //        gSerial.print(gSerialIntf.dataBuff);
+
+
         // data ready to parse
         ParseSerialData(gSerialIntf.dataBuff);
 
         switch (gCmdInst.type) {
-
           case CMD_TYPE_SET_TEMP: {
-              // TODO store value in eeprom
+              if (WriteSetTempToRom(gCmdInst.params.setTemp.id, gCmdInst.params.setTemp.val))
+                gSerial.println(F("ok\r"));
+              else
+                gSerial.println(F("fail\r"));
               break;
             }
           case CMD_TYPE_GET_TEMP: {
               CreateGetCmdResponce(gCmdInst.params.getTemp.id);
               gSerial.println(gSerialIntf.dataBuff);
+              break;
+            }
+          case CMD_TYPE_SET_MODE: {
+              if (WriteModeToRom(gCmdInst.params.setMode.id, gCmdInst.params.setMode.mode))
+                gSerial.println(F("ok\r"));
+              else
+                gSerial.println(F("fail\r"));
               break;
             }
           default:
@@ -732,6 +885,7 @@ void setup() {
   gSerial.println(F("Hello soft serail"));
 
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(SOLENOID_PIN, OUTPUT);
 
   InitDipSwitchs();
 
@@ -746,13 +900,9 @@ void setup() {
 
   InitializeSensorInstances();
 
-  // TODO read set points from EEPROM
+  ReadSetTempsFromRom();
 
-  /*
-    If temperature set point not found in EEPROM
-    set points to TEMPERATURE_SET_POINT_DEFAULT
-  */
-  //  SetTemperatureSetPointsToDefault();
+  SetSettingsToDefault();
 
   PrintSensorInstances();
 
@@ -776,8 +926,6 @@ void loop() {
 
   // Sensor reading state machine
   SensorReadingSM(gSensorReadingSm.state);
-
-//    PrintAllSensorData();
 
   // Calculate time value
   CalculateProcessTime();
