@@ -188,21 +188,21 @@ typedef struct
 } romStruct_t;
 
 static const uint8_t EEPROM_ADDRESS_TABLE[] = {
-    0x00,
-    0x03,
-    0x06,
-    0x09,
-    0x0c,
-    0x0f,
-    0x12,
-    0x15,
-    0x18,
-    0x1b,
-    0x1e,
-    0x21,
-    0x24,
-    0x27,
-    0x2a,
+  0x00,
+  0x03,
+  0x06,
+  0x09,
+  0x0c,
+  0x0f,
+  0x12,
+  0x15,
+  0x18,
+  0x1b,
+  0x1e,
+  0x21,
+  0x24,
+  0x27,
+  0x2a,
 };
 
 static uint8_t gBoardNum = SENSOR_BOARD_NONE;
@@ -333,21 +333,21 @@ static uint8_t IsIdValid(uint8_t id)
 
   switch (gBoardNum)
   {
-  case SENSOR_BOARD_1_TO_16:
-    ret = (id < 1 || id >= 16) ? false : true;
-    break;
-  case SENSOR_BOARD_17_TO_32:
-    ret = (id < 17 || id >= 32) ? false : true;
-    break;
-  case SENSOR_BOARD_33_TO_48:
-    ret = (id < 33 || id >= 48) ? false : true;
-    break;
-  case SENSOR_BOARD_49_TO_64:
-    ret = (id < 49 || id >= 64) ? false : true;
-    break;
-  default:
-    ret = false;
-    break;
+    case SENSOR_BOARD_1_TO_16:
+      ret = (id < 1 || id >= 16) ? false : true;
+      break;
+    case SENSOR_BOARD_17_TO_32:
+      ret = (id < 17 || id >= 32) ? false : true;
+      break;
+    case SENSOR_BOARD_33_TO_48:
+      ret = (id < 33 || id >= 48) ? false : true;
+      break;
+    case SENSOR_BOARD_49_TO_64:
+      ret = (id < 49 || id >= 64) ? false : true;
+      break;
+    default:
+      ret = false;
+      break;
   }
   return ret;
 }
@@ -458,18 +458,18 @@ static void InitializeSensorInstances(void)
 
   switch (gBoardNum)
   {
-  case SENSOR_BOARD_1_TO_16:
-    start = 1;
-    break;
-  case SENSOR_BOARD_17_TO_32:
-    start = 17;
-    break;
-  case SENSOR_BOARD_33_TO_48:
-    start = 33;
-    break;
-  case SENSOR_BOARD_49_TO_64:
-    start = 49;
-    break;
+    case SENSOR_BOARD_1_TO_16:
+      start = 1;
+      break;
+    case SENSOR_BOARD_17_TO_32:
+      start = 17;
+      break;
+    case SENSOR_BOARD_33_TO_48:
+      start = 33;
+      break;
+    case SENSOR_BOARD_49_TO_64:
+      start = 49;
+      break;
   }
 
   for (i = 0; i < SENSOR_COUNT; i++)
@@ -561,38 +561,38 @@ static void BuzzerSM(void)
 
   switch (gBuzzerSm.state)
   {
-  case BUZZER_STATE_START:
-  {
-    digitalWrite(BUZZER_PIN, HIGH);
-    gBuzzerSm.startMs = millis();
-    gBuzzerSm.state = BUZZER_STATE_WAIT;
-    break;
-  }
-  case BUZZER_STATE_WAIT:
-  {
-    gBuzzerSm.deltaMs = millis() - gBuzzerSm.startMs;
-    if (gBuzzerSm.deltaMs >= (BUZZER_RUN_TIME * 1000))
-    {
-      digitalWrite(BUZZER_PIN, LOW);
-      gBuzzerSm.state = BUZZER_STATE_STOP;
+    case BUZZER_STATE_START:
+      {
+        digitalWrite(BUZZER_PIN, HIGH);
+        gBuzzerSm.startMs = millis();
+        gBuzzerSm.state = BUZZER_STATE_WAIT;
+        break;
+      }
+    case BUZZER_STATE_WAIT:
+      {
+        gBuzzerSm.deltaMs = millis() - gBuzzerSm.startMs;
+        if (gBuzzerSm.deltaMs >= (BUZZER_RUN_TIME * 1000))
+        {
+          digitalWrite(BUZZER_PIN, LOW);
+          gBuzzerSm.state = BUZZER_STATE_STOP;
 
-      // TODO diable logs
-      //          Serial.print(__func__);
-      //          Serial.print(" : deltaMs: ");
-      //          Serial.println(gBuzzerSm.deltaMs);
-    }
-    break;
-  }
-  case BUZZER_STATE_STOP:
-  {
-    // do nothing idelling state
-    break;
-  }
-  default:
-  {
-    ErrorHandler(__LINE__, "invalid state");
-    break;
-  }
+          // TODO diable logs
+          //          Serial.print(__func__);
+          //          Serial.print(" : deltaMs: ");
+          //          Serial.println(gBuzzerSm.deltaMs);
+        }
+        break;
+      }
+    case BUZZER_STATE_STOP:
+      {
+        // do nothing idelling state
+        break;
+      }
+    default:
+      {
+        ErrorHandler(__LINE__, "invalid state");
+        break;
+      }
   }
 }
 
@@ -601,50 +601,50 @@ static void SensorReadingSM(uint8_t state)
 
   switch (state)
   {
-  case SENSOR_READ_STATE_START:
-  {
-    gSensorReadingSm.state = SENSOR_READ_STATE_READ;
+    case SENSOR_READ_STATE_START:
+      {
+        gSensorReadingSm.state = SENSOR_READ_STATE_READ;
 
-    // TODO disbale logs
-    //        Serial.println("Sensor Reading started");
-    break;
-  }
-  case SENSOR_READ_STATE_READ:
-  {
+        // TODO disbale logs
+        //        Serial.println("Sensor Reading started");
+        break;
+      }
+    case SENSOR_READ_STATE_READ:
+      {
 
-    ReadAllSensors();
-    gSensorReadingSm.startMs = millis();
-    gSensorReadingSm.state = SENSOR_READ_STATE_WAIT;
+        ReadAllSensors();
+        gSensorReadingSm.startMs = millis();
+        gSensorReadingSm.state = SENSOR_READ_STATE_WAIT;
 
-    // TODO disbale logs
-    //        PrintAllSensorData();
-    break;
-  }
-  case SENSOR_READ_STATE_WAIT:
-  {
-    gSensorReadingSm.deltaMs = millis() - gSensorReadingSm.startMs;
-    if (gSensorReadingSm.deltaMs >= 250) // TODO use macro
-    {
-      gSensorReadingSm.state = SENSOR_READ_STATE_READ;
+        // TODO disbale logs
+        //        PrintAllSensorData();
+        break;
+      }
+    case SENSOR_READ_STATE_WAIT:
+      {
+        gSensorReadingSm.deltaMs = millis() - gSensorReadingSm.startMs;
+        if (gSensorReadingSm.deltaMs >= 250) // TODO use macro
+        {
+          gSensorReadingSm.state = SENSOR_READ_STATE_READ;
 
-      // TODO disable logs
-      //          Serial.print("deltaTime: ");
-      //          Serial.print(gSensorReadingSm.deltaMs);
-      //          Serial.println(" ms");
-    }
-    break;
-  }
-  case SENSOR_READ_STATE_STOP:
-  {
-    // do nothing idelling state
-    break;
-  }
+          // TODO disable logs
+          //          Serial.print("deltaTime: ");
+          //          Serial.print(gSensorReadingSm.deltaMs);
+          //          Serial.println(" ms");
+        }
+        break;
+      }
+    case SENSOR_READ_STATE_STOP:
+      {
+        // do nothing idelling state
+        break;
+      }
 
-  default:
-  {
-    ErrorHandler(__LINE__, "invalid state");
-    break;
-  }
+    default:
+      {
+        ErrorHandler(__LINE__, "invalid state");
+        break;
+      }
   }
 }
 
@@ -656,101 +656,101 @@ static void SensorTimerSM(uint8_t index)
 
   switch (gSensorInstances[index].timerState)
   {
-  case SENSOR_TIMER_STATE_START:
-  {
-    gSensorInstances[index].startTimeMs = millis();
-    gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
-    break;
-  }
-  case SENSOR_TIMER_STATE_WAIT:
-  {
-    gSensorInstances[index].runTimeMs = millis() - gSensorInstances[index].startTimeMs;
-    gFullTimeMs = (gProcessTime * 1000);
-
-    switch (gSensorInstances[index].mode)
-    {
-    case SENSOR_MODE_1:
-      gFullTimeMs -= (TIME_FOR_MODE_1 * 1000);
-      break;
-    case SENSOR_MODE_2:
-      gFullTimeMs -= (TIME_FOR_MODE_2 * 1000);
-      break;
-    case SENSOR_MODE_3:
-      gFullTimeMs -= (TIME_FOR_MODE_3 * 1000);
-      break;
-    case SENSOR_MODE_4:
-      gFullTimeMs -= (TIME_FOR_MODE_4 * 1000);
-      break;
-    default:
-      ErrorHandler(__LINE__, "invalid mode");
-      break;
-    }
-
-    // checks for half time
-    if (gSensorInstances[index].runTimeMs >= gFullTimeMs / 2 &&
-        gSensorInstances[index].flags.halfTime == false)
-    {
-      gSensorInstances[index].timerState = SENSOR_TIMER_STATE_HALF_TIME;
-    }
-    else if (gSensorInstances[index].runTimeMs >= gFullTimeMs &&
-             gSensorInstances[index].flags.fullTime == false)
-    {
-      gSensorInstances[index].timerState = SENSOR_TIMER_STATE_FULL_TIME;
-    }
-    else if (gSensorInstances[index].runTimeMs >= (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
-             gSensorInstances[index].flags.endTime == false)
-    {
-      gSensorInstances[index].timerState = SENSOR_TIMER_STATE_END_TIME;
-    }
-    else
-    {
-      if (gSensorInstances[index].runTimeMs > (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
-          gSensorInstances[index].flags.endTime == true)
+    case SENSOR_TIMER_STATE_START:
       {
-        ErrorHandler(__LINE__, "critical error");
+        gSensorInstances[index].startTimeMs = millis();
+        gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
+        break;
       }
-    }
-    break;
-  }
-  case SENSOR_TIMER_STATE_HALF_TIME:
-  {
-    StartBuzzer();
-    // TODO half time readed
-    gSensorInstances[index].flags.halfTime = true;
-    gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
-    break;
-  }
-  case SENSOR_TIMER_STATE_FULL_TIME:
-  {
-    StartBuzzer();
-    // TODO full time reached
-    gSensorInstances[index].flags.fullTime = true;
-    gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
-    break;
-  }
+    case SENSOR_TIMER_STATE_WAIT:
+      {
+        gSensorInstances[index].runTimeMs = millis() - gSensorInstances[index].startTimeMs;
+        gFullTimeMs = (gProcessTime * 1000);
 
-  case SENSOR_TIMER_STATE_END_TIME:
-  {
-    StartBuzzer();
-    // TODO end time reached
-    gSensorInstances[index].flags.endTime = true;
-    gSensorInstances[index].timerState = SENSOR_TIMER_STATE_STOP;
-    break;
-  }
+        switch (gSensorInstances[index].mode)
+        {
+          case SENSOR_MODE_1:
+            gFullTimeMs -= (TIME_FOR_MODE_1 * 1000);
+            break;
+          case SENSOR_MODE_2:
+            gFullTimeMs -= (TIME_FOR_MODE_2 * 1000);
+            break;
+          case SENSOR_MODE_3:
+            gFullTimeMs -= (TIME_FOR_MODE_3 * 1000);
+            break;
+          case SENSOR_MODE_4:
+            gFullTimeMs -= (TIME_FOR_MODE_4 * 1000);
+            break;
+          default:
+            ErrorHandler(__LINE__, "invalid mode");
+            break;
+        }
 
-  case SENSOR_TIMER_STATE_STOP:
-  {
-    // do nothing
-    break;
-  }
+        // checks for half time
+        if (gSensorInstances[index].runTimeMs >= gFullTimeMs / 2 &&
+            gSensorInstances[index].flags.halfTime == false)
+        {
+          gSensorInstances[index].timerState = SENSOR_TIMER_STATE_HALF_TIME;
+        }
+        else if (gSensorInstances[index].runTimeMs >= gFullTimeMs &&
+                 gSensorInstances[index].flags.fullTime == false)
+        {
+          gSensorInstances[index].timerState = SENSOR_TIMER_STATE_FULL_TIME;
+        }
+        else if (gSensorInstances[index].runTimeMs >= (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
+                 gSensorInstances[index].flags.endTime == false)
+        {
+          gSensorInstances[index].timerState = SENSOR_TIMER_STATE_END_TIME;
+        }
+        else
+        {
+          if (gSensorInstances[index].runTimeMs > (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
+              gSensorInstances[index].flags.endTime == true)
+          {
+            ErrorHandler(__LINE__, "critical error");
+          }
+        }
+        break;
+      }
+    case SENSOR_TIMER_STATE_HALF_TIME:
+      {
+        StartBuzzer();
+        // TODO half time readed
+        gSensorInstances[index].flags.halfTime = true;
+        gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
+        break;
+      }
+    case SENSOR_TIMER_STATE_FULL_TIME:
+      {
+        StartBuzzer();
+        // TODO full time reached
+        gSensorInstances[index].flags.fullTime = true;
+        gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
+        break;
+      }
 
-  default:
-  {
-    // TODO stop program
-    Serial.print(__LINE__);
-    Serial.println(F(" :[ERR] invalid state"));
-    break;
-  }
+    case SENSOR_TIMER_STATE_END_TIME:
+      {
+        StartBuzzer();
+        // TODO end time reached
+        gSensorInstances[index].flags.endTime = true;
+        gSensorInstances[index].timerState = SENSOR_TIMER_STATE_STOP;
+        break;
+      }
+
+    case SENSOR_TIMER_STATE_STOP:
+      {
+        // do nothing
+        break;
+      }
+
+    default:
+      {
+        // TODO stop program
+        Serial.print(__LINE__);
+        Serial.println(F(" :[ERR] invalid state"));
+        break;
+      }
   }
 }
 
@@ -932,30 +932,30 @@ static void ProcessSerialData(void)
 
         switch (gCmdInst.type)
         {
-        case CMD_TYPE_SET_TEMP:
-        {
-          if (WriteSetTempToRom(gCmdInst.params.setTemp.id, gCmdInst.params.setTemp.val))
-            gSerial.println(F("ok\r"));
-          else
-            gSerial.println(F("fail\r"));
-          break;
-        }
-        case CMD_TYPE_GET_TEMP:
-        {
-          CreateGetCmdResponce(gCmdInst.params.getTemp.id);
-          gSerial.println(gSerialIntf.dataBuff);
-          break;
-        }
-        case CMD_TYPE_SET_MODE:
-        {
-          if (WriteModeToRom(gCmdInst.params.setMode.id, gCmdInst.params.setMode.mode))
-            gSerial.println(F("ok\r"));
-          else
-            gSerial.println(F("fail\r"));
-          break;
-        }
-        default:
-          break;
+          case CMD_TYPE_SET_TEMP:
+            {
+              if (WriteSetTempToRom(gCmdInst.params.setTemp.id, gCmdInst.params.setTemp.val))
+                gSerial.println(F("ok\r"));
+              else
+                gSerial.println(F("fail\r"));
+              break;
+            }
+          case CMD_TYPE_GET_TEMP:
+            {
+              CreateGetCmdResponce(gCmdInst.params.getTemp.id);
+              gSerial.println(gSerialIntf.dataBuff);
+              break;
+            }
+          case CMD_TYPE_SET_MODE:
+            {
+              if (WriteModeToRom(gCmdInst.params.setMode.id, gCmdInst.params.setMode.mode))
+                gSerial.println(F("ok\r"));
+              else
+                gSerial.println(F("fail\r"));
+              break;
+            }
+          default:
+            break;
         }
       }
       ClearSerialData();
@@ -1028,6 +1028,12 @@ void loop()
 
   // Sensor reading state machine
   SensorReadingSM(gSensorReadingSm.state);
+
+  if (gSensorInstances[SENSOR_COUNT - 1].tempRead > 350) {
+    digitalWrite(SOLENOID_PIN, LOW);
+  } else  if (gSensorInstances[SENSOR_COUNT - 1].tempRead < 300) {
+    digitalWrite(SOLENOID_PIN, HIGH);
+  }
 
   // Calculate time value
   CalculateProcessTime();
