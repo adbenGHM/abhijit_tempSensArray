@@ -670,6 +670,7 @@ static void SensorTimerSM(uint8_t index)
     case SENSOR_TIMER_STATE_START:
       {
         Serial.println(F("SENSOR_TIMER_STATE_START"));
+        gSensorInstances[index].flags.endTime = false;
         gSensorInstances[index].startTimeMs = millis();
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
         break;
@@ -753,7 +754,7 @@ static void SensorTimerSM(uint8_t index)
         // TODO end time reached
         gSensorInstances[index].flags.halfTime = false;
         gSensorInstances[index].flags.fullTime = false;
-        gSensorInstances[index].flags.endTime = false;
+        gSensorInstances[index].flags.endTime = true;
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_STOP;
         Serial.println(F("End Time reached"));
         break;
@@ -858,7 +859,7 @@ static void CreateGetCmdResponce(uint8_t id)
   JsonDocument doc;
   doc["temp"] = gSensorInstances[i].tempRead;
   doc["temp_set"] = (uint16_t)gSensorInstances[i].tempSet;
-  doc["time_remain"] = (uint16_t)(gProcessTime - (gSensorInstances[i].runTimeMs /1000));
+  doc["time_remain"] = (uint16_t)(gProcessTime - (gSensorInstances[i].runTimeMs / 1000));
   doc["half_time"] = (bool)gSensorInstances[i].flags.halfTime;
   doc["full_time"] = (bool)gSensorInstances[i].flags.fullTime;
   doc["end_time"] = (bool)gSensorInstances[i].flags.endTime;
@@ -1000,7 +1001,7 @@ void setup()
 
   Wire.begin();
 
-//  Serial.begin(9600);
+  //  Serial.begin(9600);
   Serial.println();
 
   gSerial.begin(19200);
