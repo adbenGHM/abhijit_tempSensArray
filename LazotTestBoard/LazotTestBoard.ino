@@ -13,6 +13,8 @@
 
 #define EXPIRE_TIME (120) // 120 sec or 2 minutes
 
+#define TIME_MULTIPLIER ((uint32_t)100)
+
 // DIP SWITCH
 #define DIP_SWITCH_PIN_4 (4)
 #define DIP_SWITCH_PIN_3 (5)
@@ -35,7 +37,6 @@
 // SERIAL
 #define SERIAL_RX_PIN (2)
 #define SERIAL_TX_PIN (3)
-#define SERIAL_BAUD_RATE (9600)
 #define SERIAL_BUFF_SIZE (200 + 2)
 
 // SOLINOID
@@ -226,7 +227,8 @@ static void ErrorHandler(int line, const char *reason)
     Serial.print(__LINE__);
     Serial.print(" :[ERR]");
     Serial.println(reason);
-    delay(1000);
+    delay(2000);
+    break;
   }
 }
 
@@ -376,6 +378,7 @@ static uint8_t DetermineBoardNumber(void)
   }
   else if (digitalRead(DIP_SWITCH_PIN_4) == LOW)
   {
+
     return SENSOR_BOARD_49_TO_64;
   }
   else
@@ -563,6 +566,9 @@ static void BuzzerSM(void)
   {
     case BUZZER_STATE_START:
       {
+        Serial.println(F("-------------------------BUZZER_STATE_START-------------------"));
+        Serial.print("startMs: ");
+        Serial.println(gBuzzerSm.startMs);
         digitalWrite(BUZZER_PIN, HIGH);
         gBuzzerSm.startMs = millis();
         gBuzzerSm.state = BUZZER_STATE_WAIT;
@@ -571,8 +577,13 @@ static void BuzzerSM(void)
     case BUZZER_STATE_WAIT:
       {
         gBuzzerSm.deltaMs = millis() - gBuzzerSm.startMs;
+
         if (gBuzzerSm.deltaMs >= (BUZZER_RUN_TIME * 1000))
         {
+          Serial.println(F("-------------------------BUZZER_STOP-------------------"));
+          Serial.print("StopMs: ");
+          Serial.println(gBuzzerSm.deltaMs);
+
           digitalWrite(BUZZER_PIN, LOW);
           gBuzzerSm.state = BUZZER_STATE_STOP;
 
@@ -590,7 +601,7 @@ static void BuzzerSM(void)
       }
     default:
       {
-        ErrorHandler(__LINE__, "invalid state");
+        // ErrorHandler(__LINE__, "invalid state");
         break;
       }
   }
@@ -642,7 +653,7 @@ static void SensorReadingSM(uint8_t state)
 
     default:
       {
-        ErrorHandler(__LINE__, "invalid state");
+        // ErrorHandler(__LINE__, "invalid state");
         break;
       }
   }
@@ -650,82 +661,89 @@ static void SensorReadingSM(uint8_t state)
 
 static void SensorTimerSM(uint8_t index)
 {
-
   if (index >= SENSOR_COUNT - 1)
     ErrorHandler(__LINE__, "invalid index");
+
 
   switch (gSensorInstances[index].timerState)
   {
     case SENSOR_TIMER_STATE_START:
       {
+        Serial.println(F("SENSOR_TIMER_STATE_START"));
         gSensorInstances[index].startTimeMs = millis();
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
         break;
       }
     case SENSOR_TIMER_STATE_WAIT:
       {
+        Serial.println(F("SENSOR_TIMER_STATE_WAIT"));
         gSensorInstances[index].runTimeMs = millis() - gSensorInstances[index].startTimeMs;
-        gFullTimeMs = (gProcessTime * 1000);
+        gFullTimeMs = (gProcessTime * TIME_MULTIPLIER);
+        uint32_t endTime = (gFullTimeMs + ((uint32_t)EXPIRE_TIME * TIME_MULTIPLIER));
+
+        Serial.print(F("runTimeMs: "));
+        Serial.print(gSensorInstances[index].runTimeMs);
+        Serial.print(F("  gFullTimeMs: "));
+        Serial.print(gFullTimeMs);
+        Serial.print(F("  endtime: "));
+        Serial.println(endTime);
+
 
         switch (gSensorInstances[index].mode)
         {
           case SENSOR_MODE_1:
-            gFullTimeMs -= (TIME_FOR_MODE_1 * 1000);
+            gFullTimeMs -= (TIME_FOR_MODE_1 * TIME_MULTIPLIER);
             break;
           case SENSOR_MODE_2:
-            gFullTimeMs -= (TIME_FOR_MODE_2 * 1000);
+            gFullTimeMs -= (TIME_FOR_MODE_2 * TIME_MULTIPLIER);
             break;
           case SENSOR_MODE_3:
-            gFullTimeMs -= (TIME_FOR_MODE_3 * 1000);
+            gFullTimeMs -= (TIME_FOR_MODE_3 * TIME_MULTIPLIER);
             break;
           case SENSOR_MODE_4:
-            gFullTimeMs -= (TIME_FOR_MODE_4 * 1000);
+            gFullTimeMs -= (TIME_FOR_MODE_4 * TIME_MULTIPLIER);
             break;
           default:
-            ErrorHandler(__LINE__, "invalid mode");
+            // ErrorHandler(__LINE__, "invalid mode");
             break;
         }
 
-        // checks for half time
-        if (gSensorInstances[index].runTimeMs >= gFullTimeMs / 2 &&
-            gSensorInstances[index].flags.halfTime == false)
+        if (gSensorInstances[index].runTimeMs >= gFullTimeMs / 2)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_HALF_TIME;
         }
-        else if (gSensorInstances[index].runTimeMs >= gFullTimeMs &&
-                 gSensorInstances[index].flags.fullTime == false)
+
+        if (gSensorInstances[index].runTimeMs >= gFullTimeMs)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_FULL_TIME;
         }
-        else if (gSensorInstances[index].runTimeMs >= (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
-                 gSensorInstances[index].flags.endTime == false)
+
+        if (gSensorInstances[index].runTimeMs >= endTime)
         {
           gSensorInstances[index].timerState = SENSOR_TIMER_STATE_END_TIME;
         }
-        else
-        {
-          if (gSensorInstances[index].runTimeMs > (gFullTimeMs + (EXPIRE_TIME * 1000)) &&
-              gSensorInstances[index].flags.endTime == true)
-          {
-            ErrorHandler(__LINE__, "critical error");
-          }
-        }
+
         break;
       }
     case SENSOR_TIMER_STATE_HALF_TIME:
       {
-        StartBuzzer();
         // TODO half time readed
+        if (gSensorInstances[index].flags.halfTime == false)
+          StartBuzzer();
         gSensorInstances[index].flags.halfTime = true;
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
+        Serial.println(F("Half Time reached"));
         break;
       }
     case SENSOR_TIMER_STATE_FULL_TIME:
       {
-        StartBuzzer();
+
+        if (gSensorInstances[index].flags.fullTime == false)
+          StartBuzzer();
         // TODO full time reached
         gSensorInstances[index].flags.fullTime = true;
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_WAIT;
+        Serial.println(F("Full Time reached"));
         break;
       }
 
@@ -733,8 +751,11 @@ static void SensorTimerSM(uint8_t index)
       {
         StartBuzzer();
         // TODO end time reached
-        gSensorInstances[index].flags.endTime = true;
+        gSensorInstances[index].flags.halfTime = false;
+        gSensorInstances[index].flags.fullTime = false;
+        gSensorInstances[index].flags.endTime = false;
         gSensorInstances[index].timerState = SENSOR_TIMER_STATE_STOP;
+        Serial.println(F("End Time reached"));
         break;
       }
 
@@ -772,6 +793,7 @@ static void CalculateProcessTime(void)
   if (temp != NAN && (int)temp < TEMPERATURE_MAX_POINT)
   {
     gProcessTime = (435 + (325 - temp)) + (60 * ((325 - temp) / 50)); // TODO calculate actual process time
+
     //    Serial.print(F("Process Time: "));
     //    Serial.print(gProcessTime);
     //    Serial.println(F(" sec"));
@@ -805,17 +827,17 @@ static void CheckForTemperatureTriggers(void)
     {
 
       // TODO disable log
-      //      Serial.print(F("[WRN]: prob disconnected[ "));
-      //      Serial.print(gSensorInstances[i].id);
-      //      Serial.println(" ]");
+      //            Serial.print(F("[WRN]: prob disconnected[ "));
+      //            Serial.print(gSensorInstances[i].id);
+      //            Serial.println(" ]");
       break;
     }
     else if ((uint16_t)gSensorInstances[i].tempRead >=
              gSensorInstances[i].tempSet)
     {
       // TODO disable log
-      //      Serial.print(gSensorInstances[i].id);
-      //      Serial.println(F(" Probe Set point reached"));
+      Serial.print(gSensorInstances[i].id);
+      Serial.println(F(" Probe Set point reached"));
       StartTimer(i);
     }
   }
@@ -836,11 +858,11 @@ static void CreateGetCmdResponce(uint8_t id)
   JsonDocument doc;
   doc["temp"] = gSensorInstances[i].tempRead;
   doc["temp_set"] = (uint16_t)gSensorInstances[i].tempSet;
-  doc["time_remain"] = (uint16_t)(gProcessTime - gSensorInstances[i].runTimeMs);
+  doc["time_remain"] = (uint16_t)(gProcessTime - (gSensorInstances[i].runTimeMs /1000));
   doc["half_time"] = (bool)gSensorInstances[i].flags.halfTime;
   doc["full_time"] = (bool)gSensorInstances[i].flags.fullTime;
   doc["end_time"] = (bool)gSensorInstances[i].flags.endTime;
-  doc["mode"] = (uint8_t)1;
+  doc["mode"] = (uint8_t)gSensorInstances[i].mode;
 
   serializeJson(doc, gSerialIntf.dataBuff, sizeof(gSerialIntf.dataBuff));
 }
@@ -978,10 +1000,10 @@ void setup()
 
   Wire.begin();
 
-  Serial.begin(9600);
+//  Serial.begin(9600);
   Serial.println();
 
-  gSerial.begin(9600);
+  gSerial.begin(19200);
 
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(SOLENOID_PIN, OUTPUT);
@@ -1011,7 +1033,7 @@ void setup()
     ErrorHandler(__LINE__, "critical error");
   }
 
-  gSerial.begin(SERIAL_BAUD_RATE);
+  //  gSerial.begin(SERIAL_BAUD_RATE);
 
   max6675_Init();
 
@@ -1048,5 +1070,5 @@ void loop()
 
   BuzzerSM();
 
-  //  PrintAllSensorData();
+  PrintAllSensorData();
 }
